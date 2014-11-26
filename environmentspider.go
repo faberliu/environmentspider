@@ -37,6 +37,7 @@ func ParseData(s *goquery.Selection) {
 	log.Println("开始抓取城市列表和地址")
 	s.Find("a").Each(func(i int, s *goquery.Selection) {
 		url, _ := s.Attr("href")
+		//go GetUrl(s.Text(), url) 如果使用协程进行抓取，网站容易直接崩溃
 		GetUrl(s.Text(), url)
 	})
 }
