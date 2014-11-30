@@ -1,16 +1,17 @@
 package main
 
 import (
-	"github.com/PuerkitoBio/goquery"
-	"github.com/djimenez/iconv-go"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/djimenez/iconv-go"
 )
 
-type CityInfo struct {
+type AirInfo struct {
 	Name      string
 	Time      string
 	AQI       int
@@ -18,11 +19,11 @@ type CityInfo struct {
 	Pollution string
 }
 
-func (city *CityInfo) ToString() string {
-	return city.Name + "	" + city.Time + "	" + strconv.Itoa(city.AQI) + "	" + city.Level
+func (city *AirInfo) ToString() string {
+	return city.Name + "	" + city.Time + "	" + strconv.Itoa(city.AQI) + "	" + city.Level + "	" + city.Pollution
 }
 
-func (city *CityInfo) SaveDataToFile() {
+func (city *AirInfo) SaveDataToFile() {
 	log.Println("save to file", city.Name)
 	f, err := os.OpenFile(city.Name+".txt", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
@@ -33,18 +34,9 @@ func (city *CityInfo) SaveDataToFile() {
 	f.WriteString("\n")
 }
 
-func ParseData(s *goquery.Selection) {
-	log.Println("开始抓取城市列表和地址")
-	s.Find("a").Each(func(i int, s *goquery.Selection) {
-		url, _ := s.Attr("href")
-		//go GetUrl(s.Text(), url) 如果使用协程进行抓取，网站容易直接崩溃
-		GetUrl(s.Text(), url)
-	})
-}
-
-func GetUrl(city, url string) {
-	name, _ := iconv.ConvertString(city, "GB18030", "UTF-8")
-	log.Println("正在获取", name, "的数据")
+func GetAllCityUrl(url string) ([]string, []string) {
+	urls := make([]string, 0, 200)
+	cities := make([]string, 0, 200)
 	doc, err := goquery.NewDocument(url)
 	if err != nil {
 		panic(err)
@@ -52,14 +44,52 @@ func GetUrl(city, url string) {
 	table := doc.Find("table")
 	for i := range table.Nodes {
 		if single := table.Eq(i); single.HasClass("font12") {
-			if frame := single.Has("IFRAME"); frame != nil {
-				ParseFrame(frame)
+			if single.Find("table").Text() != "" {
+				continue
+			}
+			single.Find("a").Each(func(i int, s *goquery.Selection) {
+				url, ok := s.Attr("href")
+				if ok {
+					urls = append(urls, url)
+					cities = append(cities, s.Text())
+				}
+			})
+		}
+	}
+	return cities, urls
+}
+
+func GetRealUrl(url string) string {
+	result := ""
+	doc, err := goquery.NewDocument(url)
+	if err != nil {
+		panic(err)
+	}
+	table := doc.Find("table")
+	for i := range table.Nodes {
+		single := table.Eq(i)
+		if !single.HasClass("font12") {
+			continue
+		}
+		frames := single.Has("IFRAME")
+		if frames == nil {
+			continue
+		}
+		frame := frames.Find("IFRAME")
+		for i := range frame.Nodes {
+			single := frame.Eq(i)
+			if src, ok := single.Attr("src"); ok {
+				if src != "" {
+					result = src
+				}
 			}
 		}
 	}
+	return result
 }
 
-func GetData(url string) {
+func GetCityData(url string) []*AirInfo {
+	cities := make([]*AirInfo, 0, 200)
 	if !strings.HasPrefix(url, "http://") {
 		url = "http://datacenter.mep.gov.cn/report/air_daily/" + url
 	}
@@ -67,7 +97,6 @@ func GetData(url string) {
 	if err != nil {
 		panic(err)
 	}
-
 	tr := doc.Find("table").Last().Find("tr")
 	length := tr.Length()
 	for i := 1; i < length; i++ {
@@ -79,50 +108,58 @@ func GetData(url string) {
 		aqi, _ := strconv.Atoi(aqi_s)
 		level, _ := convert.ConvertString(data.Eq(4).Text())
 		pollution, _ := convert.ConvertString(data.Eq(5).Text())
-		m := &CityInfo{
+		m := &AirInfo{
 			Name:      addr,
 			Time:      date,
 			AQI:       aqi,
 			Level:     level,
 			Pollution: pollution,
 		}
-		m.SaveDataToFile()
+		cities = append(cities, m)
+	}
+	return cities
+}
+
+func GetCityInfo(url string) {
+	convert, _ := iconv.NewConverter("GB18030", "UTF-8")
+	urlUTF8, _ := convert.ConvertString(url)
+	log.Println("源地址：", urlUTF8)
+	realUrl := GetRealUrl(url)
+	realUrlUTF8, _ := convert.ConvertString(realUrl)
+	log.Println("真实地址：", realUrlUTF8)
+	cities := GetCityData(realUrl)
+	for _, value := range cities {
+		value.SaveDataToFile()
 	}
 }
 
-func ParseFrame(frames *goquery.Selection) {
-	frame := frames.Find("IFRAME")
-	for i := range frame.Nodes {
-		single := frame.Eq(i)
-		if src, ok := single.Attr("src"); ok {
-			if src == "" {
-				continue
-			}
-			GetData(src)
-		}
+type EnvironmentSpider struct {
+	Url string
+}
+
+func NewEnvironmentspider(url string) *EnvironmentSpider {
+	return &EnvironmentSpider{
+		Url: url,
+	}
+}
+
+func (env *EnvironmentSpider) Crawl() {
+	cities, urls := GetAllCityUrl(env.Url)
+	for i := range urls {
+		cityUTF8, _ := iconv.ConvertString(cities[i], "GB18030", "UTF-8")
+		log.Println("正在获取", cityUTF8, "的环境数据")
+		GetCityInfo(urls[i])
 	}
 }
 
 func main() {
 	count := 1
 	url := "http://datacenter.mep.gov.cn/report/air_daily/airDairyCityHourMain.jsp"
+	env := NewEnvironmentspider(url)
 	for {
 		log.Println("正在进行第", count, "次抓取")
-		doc, err := goquery.NewDocument(url)
-		if err != nil {
-			panic(err)
-		}
-		table := doc.Find("table")
-		for i := range table.Nodes {
-			if single := table.Eq(i); single.HasClass("font12") {
-				if single.Find("table").Text() != "" {
-					continue
-				}
-				ParseData(single)
-			}
-		}
-		log.Println("第", count, "次抓取完毕")
+		env.Crawl()
 		count++
-		time.Sleep(10 * time.Minute)
+		time.Sleep(20 * time.Minute)
 	}
 }
