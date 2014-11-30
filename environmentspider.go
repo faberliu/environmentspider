@@ -81,6 +81,7 @@ func GetRealUrl(url string) string {
 			if src, ok := single.Attr("src"); ok {
 				if src != "" {
 					result = src
+					return result
 				}
 			}
 		}
@@ -133,17 +134,17 @@ func GetCityInfo(url string) {
 	}
 }
 
-type EnvironmentSpider struct {
+type AirSpider struct {
 	Url string
 }
 
-func NewEnvironmentspider(url string) *EnvironmentSpider {
-	return &EnvironmentSpider{
+func NewAirSpider(url string) *AirSpider {
+	return &AirSpider{
 		Url: url,
 	}
 }
 
-func (env *EnvironmentSpider) Crawl() {
+func (env *AirSpider) Crawl() {
 	cities, urls := GetAllCityUrl(env.Url)
 	for i := range urls {
 		cityUTF8, _ := iconv.ConvertString(cities[i], "GB18030", "UTF-8")
@@ -155,7 +156,7 @@ func (env *EnvironmentSpider) Crawl() {
 func main() {
 	count := 1
 	url := "http://datacenter.mep.gov.cn/report/air_daily/airDairyCityHourMain.jsp"
-	env := NewEnvironmentspider(url)
+	env := NewAirSpider(url)
 	for {
 		log.Println("正在进行第", count, "次抓取")
 		env.Crawl()
